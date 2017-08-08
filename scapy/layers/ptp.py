@@ -2,23 +2,43 @@ from scapy.packet import *
 from scapy.fields import *
 from scapy.layers.inet import UDP
 
-class TimeStampField(FixedPointField):
+# class TimeStampField(FixedPointField):
+    # def __init__(self, name, default):
+        # FixedPointField.__init__(self, name, default, 80, 8)
+    # def i2repr(self, pkt, val):
+        # if val is None:
+            # return "--"
+        # val = self.i2h(pkt,val)
+        # return time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(val))
+#    def any2i(self, pkt, val):
+#        if type(val) is str:
+#            return int(time.mktime(time.strptime(val)))
+#        return FixedPointField.any2i(self,pkt,val)
+#    def i2m(self, pkt, val):
+#        if val is None:
+#            val = FixedPointField.any2i(self, pkt, time.time())
+#        return FixedPointField.i2m(self, pkt, val) 
+
+class TimeStampField(BitField):
     def __init__(self, name, default):
-        FixedPointField.__init__(self, name, default, 80, 32)
-    def i2repr(self, pkt, val):
-        if val is None:
-            return "--"
-        val = self.i2h(pkt,val)
-        return time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(val))
+        BitField.__init__(self, name, default, 80)
+
     def any2i(self, pkt, val):
-        if type(val) is str:
-            return int(time.mktime(time.strptime(val)))
-        return FixedPointField.any2i(self,pkt,val)
-    def i2m(self, pkt, val):
         if val is None:
-            val = FixedPointField.any2i(self, pkt, time.time())
-        return FixedPointField.i2m(self, pkt, val) 
-        
+            return val
+        ival = int(val)
+        fract = int( (val-ival) * 1000000000 )
+        return (ival << 32) | fract
+
+    def i2h(self, pkt, val):
+        int_part = val >> 32
+        frac_part = int(val) & 0xFFFFFFFF
+        return int_part+float(frac_part)/1000000000
+    def i2repr(self, pkt, val):
+        return self.i2h(pkt, val) 
+
+
+
 class PortIdentityField(Field):
     def __init__(self, name, default):
          Field.__init__(self, name, default, "10s")
@@ -79,7 +99,6 @@ class PtpHdr(Packet):
     def post_build(self, p, pay):
         l = len(p+pay)
         p = p[:2] + struct.pack("!H", l) + p[4:]
-        print 'ML', l
         return p+pay
 
 class PtpEventMsg(Packet):
@@ -129,12 +148,11 @@ class PtpEventMsg(Packet):
         PortIdentityField('sourcePortIdentity','\0\0\0\0\0\0\0\0\0\0'),
         ShortField('sequenceId',0),
         ByteField('controlField',0),
-        ByteField('logMessageInterval', 1)
+        ByteField('logMessageInterval', 0)
         ]    
     def post_build(self, p, pay):
         l = len(p+pay)
         p = p[:2] + struct.pack("!H", l) + p[4:]
-        print 'ML', l
         return p+pay
     def guess_payload_class(self, payload):
         if self.messageType == 0:
@@ -170,7 +188,7 @@ class PtpGeneralMsg(Packet):
         ShortField('messageLength',None),
         ByteField('domainNumber',0),
         ByteField('reserved2',0),
-        FlagsField('flagField',0x0200,16,[ "leap61",
+        FlagsField('flagField',0x0000,16,[ "leap61",
                                       "leap59",
                                       "currentUtcOffsetValid",
                                       "ptpTimescale",
@@ -191,7 +209,7 @@ class PtpGeneralMsg(Packet):
         PortIdentityField('sourcePortIdentity','\0\0\0\0\0\0\0\0\0\0'),
         ShortField('sequenceId',0),
         ByteField('controlField',0),
-        ByteField('logMessageInterval', 1)
+        ByteField('logMessageInterval', 0)
         ]    
         
     def post_build(self, p, pay):
@@ -199,8 +217,6 @@ class PtpGeneralMsg(Packet):
         p = p[0:2]  + struct.pack("!H", l) +  p[4:]
         return p+pay
 
-        
-        
     def guess_payload_class(self, payload):
         if self.messageType == 2:
             return PtpPDelayReq
@@ -248,10 +264,7 @@ class PtpFollowUp(Packet):
 #       PtpGeneralMsg,
         TimeStampField('preciseOriginTimestamp',0)
         ]
-    def post_build(self, p, pay):
-        l = len(p)
-        p = struct.pack("B", 0x8) + p[1:2]  + struct.pack("!H", l) +  p[4:32] + struct.pack("B", 2) + p[33:]
-        return p+pay
+
 
 class PtpDelayReq(Packet):
     name = 'PtpDelayReq'
@@ -259,10 +272,10 @@ class PtpDelayReq(Packet):
         PtpEventMsg,
         TimeStampField('originTimestamp',0)
         ]
-    def post_build(self, p, pay):
-        l = len(p)
-        p = struct.pack("B", 0x1) + p[1:2]  + struct.pack("!H", l) +  p[4:32] + struct.pack("B", 1) + p[33:]
-        return p+pay
+    # def post_build(self, p, pay):
+        # l = len(p)
+        # p = struct.pack("B", 0x1) + p[1:2]  + struct.pack("!H", l) +  p[4:32] + struct.pack("B", 1) + p[33:]
+        # return p+pay
 
 class PtpDelayResp(Packet):
     name = 'PtpDelayResp'
@@ -271,10 +284,10 @@ class PtpDelayResp(Packet):
         TimeStampField('receiveTimestamp',0),
         PortIdentityField('requestingPortIdentity','\0\0\0\0\0\0\0\0\0\0')
         ]
-    def post_build(self, p, pay):
-        l = len(p)
-        p = struct.pack("B", 0x9) + p[1:2]  + struct.pack("!H", l) +  p[4:32] + struct.pack("B", 3) + p[33:]
-        return p+pay
+    # def post_build(self, p, pay):
+        # l = len(p)
+        # p = struct.pack("B", 0x9) + p[1:2]  + struct.pack("!H", l) +  p[4:32] + struct.pack("B", 3) + p[33:]
+        # return p+pay
 
 class PtpPDelayReq(Packet):
     name = 'PtpPDelayReq'
@@ -282,10 +295,10 @@ class PtpPDelayReq(Packet):
 #        PtpGeneralMsg,
         TimeStampField('originTimestamp',0)
     ]
-    def post_build(self, p, pay):
-        l = len(p)
-        p = struct.pack("B", 0x2) + p[1:2]  + struct.pack("!H", l) +  p[4:32] + struct.pack("B", 5) + p[33:]
-        return p+pay
+    # def post_build(self, p, pay):
+        # l = len(p)
+        # p = struct.pack("B", 0x2) + p[1:2]  + struct.pack("!H", l) +  p[4:32] + struct.pack("B", 5) + p[33:]
+        # return p+pay
 
 class PtpPDelayResp(Packet):
     name = 'PtpPDelayResp'
@@ -294,10 +307,10 @@ class PtpPDelayResp(Packet):
         TimeStampField('requestReceiptTimestamp',0),
         PortIdentityField('requestingPortIdentity','\0\0\0\0\0\0\0\0\0\0')
         ]
-    def post_build(self, p, pay):
-        l = len(p)
-        p = struct.pack("B", 0x3) + p[1:2]  + struct.pack("!H", l) +  p[4:32] + struct.pack("B", 5) + p[33:]
-        return p+pay
+    # def post_build(self, p, pay):
+        # l = len(p)
+        # p = struct.pack("B", 0x3) + p[1:2]  + struct.pack("!H", l) +  p[4:32] + struct.pack("B", 5) + p[33:]
+        # return p+pay
 
 class PtpTlv(Packet):
     name = 'PtpTlv'
@@ -356,6 +369,8 @@ class PtpManagement(Packet):
 class PtpTlvManagement(Packet):
     name = 'PtpTlvManagement'
     fields_desc = [
+        ShortField('tlvType',0x0001),
+        ShortField("lengthField",2),        
         ShortEnumField('managementId',0, {0x0000:"NULL_MANAGEMENT",
                                           0x0001:"CLOCK_DESCRIPTION",
                                           0x0002:"USER_DESCRIPTION",
@@ -419,17 +434,20 @@ class PtpTlvPathTrace(Packet):
     pt_list = []
     fields_desc = [
         ShortField('tlvType',0x0008),
-        FieldLenField("lengthField", None, count_of = "pathSequence",adjust=lambda pkt,x:(8*x)),        
-        FieldListField("pathSequence", default = [], field = ClockIdentityField('', '\0\0\0\0\0\0\0\0'), count_from = lambda pkt: pkt.lengthField) 
+        FieldLenField("lengthField", None, length_of = "pathSequence"), #adjust=lambda pkt,x:(8*x)),
+        FieldListField("pathSequence", default = [], field = ClockIdentityField('', '\0\0\0\0\0\0\0\0'), length_from = lambda pkt:pkt.lengthField) 
     ]
 
-    def post_build(self, p, pay):
-        if (pay != None):
-            l = len(pay)
-        else:
-            l = 0
-        p = p[:2] + struct.pack("!H", l) + p[4:]
-        return p+pay
+    # def post_build(self, p, pay):
+        # if (pay != None):
+            # print "X0"
+            # l = len(pay)
+            # print l
+        # else:
+            # print "X1"
+            # l = 0
+        # p = p[:2] + struct.pack("!H", l) + p[4:]
+        # return p+pay
 
 
 
